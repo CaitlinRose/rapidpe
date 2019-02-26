@@ -18,7 +18,7 @@
 A collection of routines to manage Condor workflows (DAGs).
 """
 
-import os
+import os,ast
 
 from glue import pipeline
 
@@ -66,8 +66,15 @@ def write_integrate_likelihood_extrinsic_sub(tag='integrate', exe=None, log_dir=
     Outputs:
         - An instance of the CondorDAGJob that was generated for ILE
     """
+    #If a kwarg option is defined as e.g. psd_file, convert it to psd-file because that's what the executable takes as input
+    new_kwargs = {}
+    for opt, param in kwargs.iteritems():
+        if isinstance(param,str) and len(param) > 1 and param[0] is "[" and param[-1] is "]":
+            param = ast.literal_eval(param)
+        new_kwargs[opt.replace("_","-")] = param
+    kwargs = new_kwargs
 
-    assert len(kwargs["psd_file"]) == len(kwargs["channel_name"])
+    assert len(kwargs["psd-file"]) == len(kwargs["channel-name"])
 
     exe = exe or which("rapidpe_integrate_extrinsic_likelihood")
     ile_job = pipeline.CondorDAGJob(universe="vanilla", executable=exe)
@@ -85,17 +92,17 @@ def write_integrate_likelihood_extrinsic_sub(tag='integrate', exe=None, log_dir=
     ile_job.set_stderr_file("%s%s-%s.err" % (log_dir, tag, uniq_str))
     ile_job.set_stdout_file("%s%s-%s.out" % (log_dir, tag, uniq_str))
 
-    if kwargs.has_key("output_file") and kwargs["output_file"] is not None:
+    if kwargs.has_key("output-file") and kwargs["output-file"] is not None:
         #
         # Need to modify the output file so it's unique
         #
-        ofname = kwargs["output_file"].split(".")
+        ofname = kwargs["output-file"].split(".")
         ofname, ext = ofname[0], ".".join(ofname[1:])
         ile_job.add_file_opt("output-file", "%s-%s.%s" % (ofname, uniq_str, ext))
-        del kwargs["output_file"]
-        if kwargs.has_key("save_samples") and kwargs["save_samples"] is True:
+        del kwargs["output-file"]
+        if kwargs.has_key("save-samples") and kwargs["save-samples"] is True:
             ile_job.add_opt("save-samples", '')
-            del kwargs["save_samples"]
+            del kwargs["save-samples"]
 
     #
     # Add normal arguments
@@ -105,14 +112,14 @@ def write_integrate_likelihood_extrinsic_sub(tag='integrate', exe=None, log_dir=
         if isinstance(param, list) or isinstance(param, tuple):
             # NOTE: Hack to get around multiple instances of the same option
             for p in param:
-                ile_job.add_arg("--%s %s" % (opt.replace("_", "-"), str(p)))
+                ile_job.add_arg("--%s %s" % (opt, str(p)))
         elif param is True or param is None:
-            ile_job.add_opt(opt.replace("_", "-"), '')
+            ile_job.add_opt(opt, '')
         # Explcitly check for False to turn it off
         elif param is False:
             continue
         else:
-            ile_job.add_opt(opt.replace("_", "-"), str(param))
+            ile_job.add_opt(opt, str(param))
 
     #
     # Macro based options
@@ -120,7 +127,7 @@ def write_integrate_likelihood_extrinsic_sub(tag='integrate', exe=None, log_dir=
     ile_job.add_var_opt("mass1")
     ile_job.add_var_opt("mass2")
     for p in intr_prms:
-        ile_job.add_var_opt(p.replace("_", "-"))
+        ile_job.add_var_opt(p)
 
     ile_job.add_condor_cmd('getenv', 'True')
     if condor_commands is not None:

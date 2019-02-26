@@ -22,6 +22,7 @@ from __future__ import print_function
 
 import sys
 import os
+import ast
 from argparse import ArgumentParser
 
 import numpy as np
@@ -58,6 +59,9 @@ argp.add_argument("--write-script", action="store_true", help="In addition to th
 argp.add_argument("--write-eff-lambda", action="store_true", help="Use psi0 column of template bank XML as effective lambda point to calculate in DAG.")
 argp.add_argument("--write-deff-lambda", action="store_true", help="Use psi3 column of template bank XML as delta effective lambda point to calculate in DAG.")
 argp.add_argument("--condor-command", action="append", help="Append these condor commands to the submit files. Useful for account group information.")
+argp.add_argument("--exe-integrate-likelihood", default=None, help="This is executable to use to integrate the extrinsic likelihood per intrinsic grid point. It will default to the lalsuite rapidpe_integrate_extrinsic_likelihood.")
+argp.add_argument("--integration-args-dict", default="", help="Pass these options as the kwargs input of the integrate dag creation function. They will be set, without editing, as input to the integration exe. If you use this, it will not be possible to also pass other command line arguments to the integration executable via the create_event_dag command line.")
+
 
 for cat, val in MAXJOBS.iteritems():
     optname = "--maxjobs-%s" % cat.lower().replace("_", "-")
@@ -78,6 +82,7 @@ if not opts.template_bank_xml:
 condor_commands = None
 if opts.condor_command is not None:
     condor_commands = dict([c.split("=") for c in opts.condor_command])
+
 
 #
 # Get trigger information from coinc xml file
@@ -114,7 +119,6 @@ if tmplt_bnk is None:
 # Post processing options
 #
 # FIXME: Remove these entirely
-use_ile_postproc = False
 use_bayespe_postproc = False
 
 # initialize the analysis subdag
@@ -133,6 +137,7 @@ if not os.path.exists(opts.log_directory):
     os.makedirs(opts.log_directory) # Make a directory to hold log files of jobs
 
 # All the intrinsic parameters we're gridding in
+#NOTE: this isn't used anywhere, the intrinsic parameters are instead read from 
 intr_prms = set(("mass1", "mass2"))
 for p in ("spin1z", "spin2z"): # FIXME: Add all
     if hasattr(tmplt_bnk[0], p):
@@ -145,7 +150,23 @@ if opts.write_eff_lambda:
 if opts.write_deff_lambda:
     intr_prms.add("deff_lambda")
 
-ile_job_type, ile_sub_name = dagutils.write_integrate_likelihood_extrinsic_sub(
+ile_job_type = None
+exe = opts.exe_integrate_likelihood if opts.exe_integrate_likelihood is not None else "rapidpe_integrate_extrinsic_likelihood"
+if opts.integration_args_dict is not "":
+
+    ile_job_type, ile_sub_name = dagutils.write_integrate_likelihood_extrinsic_sub(
+        tag='integrate',
+        condor_commands=condor_commands,
+        intr_prms=intr_prms,
+        log_dir=opts.log_directory,
+        exe=exe,
+        ncopies=opts.n_copies,
+        **ast.literal_eval(opts.integration_args_dict)
+        )
+
+
+else:
+    ile_job_type, ile_sub_name = dagutils.write_integrate_likelihood_extrinsic_sub(
         tag='integrate',
         condor_commands=condor_commands,
         intr_prms=intr_prms,
@@ -161,7 +182,9 @@ ile_job_type, ile_sub_name = dagutils.write_integrate_likelihood_extrinsic_sub(
 		amp_order=opts.amp_order,
 		l_max=opts.l_max,
         event_time=event_time,
+        exe=exe,
         time_marginalization=opts.time_marginalization,
+#FIXME after adding psi phi back        psi_phi_marginalization=opts.psi_phi_marginalization,
         save_samples=opts.save_samples,
         output_file=opts.output_file,
         n_eff=opts.n_eff,
@@ -172,7 +195,7 @@ ile_job_type, ile_sub_name = dagutils.write_integrate_likelihood_extrinsic_sub(
         adapt_floor_level=opts.adapt_floor_level,
         adapt_weight_exponent=opts.adapt_weight_exponent,
         skymap_file=(opts.skymap_file or False),
-        distance_maximum=opts.distance_maximum
+        distance_maximum=opts.distance_maximum,
         )
 ile_job_type.write_sub_file()
 
@@ -185,22 +208,6 @@ if use_bayespe_postproc:
     bpp_plot_node.set_category("PLOT")
     bpp_plot_node.set_pre_script(dagutils.which("bayes_pe_preprocess"))
     ppdag.add_node(bpp_plot_node)
-
-#
-# Make the posterior plot here since we need to make it the child of every sql
-# node in the DAG
-#
-if use_ile_postproc:
-    pos_plot_job_type, pos_plot_job_name = dagutils.write_posterior_plot_sub(tag="pos_plot", log_dir=opts.log_directory)
-    pos_plot_job_type.write_sub_file()
-    pos_plot_node = pipeline.CondorDAGNode(pos_plot_job_type)
-    pos_plot_node.set_pre_script(dagutils.which("coalesce.sh"))
-    pos_plot_node.set_category("PLOT")
-    pos_plot_node.set_priority(JOB_PRIORITIES["PLOT"])
-    ppdag.add_node(pos_plot_node)
-
-sql_job_type, sql_job_name = dagutils.write_result_coalescence_sub(tag="coalesce", log_dir=opts.log_directory)
-sql_job_type.write_sub_file()
 
 # TODO: Mass index table
 for i, tmplt in enumerate(tmplt_bnk):
@@ -230,38 +237,24 @@ for i, tmplt in enumerate(tmplt_bnk):
     ile_node.set_category("ILE")
     dag.add_node(ile_node)
 
-    sql_node = pipeline.CondorDAGNode(sql_job_type)
-    # FIXME: Uncomment this line and the next to reconnect the subdags
-    #if use_bayespe_postproc:
-        #bpp_plot_node.add_parent(ile_node)
-    #sql_node.add_parent(ile_node)
-    sql_node.set_priority(JOB_PRIORITIES["SQL"])
-
-    # The sql node needs to run a PRE script in order to coalesce the data into
-    # a cache
-    sql_node.set_pre_script(dagutils.which("coalesce.sh"))
-    sql_node.add_pre_script_arg(mass_grouping)
-
-    # This is to identify output from groupings of the sane mass point
-    sql_node.add_macro("macromassid", mass_grouping)
-
-    sql_node.set_category("SQL")
-    ppdag.add_node(sql_node)
-
-    if use_ile_postproc:
-        tri_plot_job_type, tri_plot_job_name = dagutils.write_tri_plot_sub(tag="tri_plot", injection_file=opts.sim_xml, log_dir=opts.log_directory)
-        tri_plot_job_type.write_sub_file()
-        tri_plot_node = pipeline.CondorDAGNode(tri_plot_job_type)
-        tri_plot_node.add_macro("macromassid", mass_grouping)
-        tri_plot_node.set_category("PLOT")
-        tri_plot_node.set_priority(JOB_PRIORITIES["PLOT"])
-        ppdag.add_node(tri_plot_node)
-        tri_plot_node.add_parent(sql_node)
-    
-        # In the interest of not blocking later DAGs for completion in an
-        # uberdag, this is now dependent on the SQL step
-        pos_plot_node.add_parent(sql_node)
-
+##%    sql_node = pipeline.CondorDAGNode(sql_job_type)
+##%    # FIXME: Uncomment this line and the next to reconnect the subdags
+##%    #if use_bayespe_postproc:
+##%        #bpp_plot_node.add_parent(ile_node)
+##%    #sql_node.add_parent(ile_node)
+##%    sql_node.set_priority(JOB_PRIORITIES["SQL"])
+##%
+##%    # The sql node needs to run a PRE script in order to coalesce the data into
+##%    # a cache
+##%    sql_node.set_pre_script(dagutils.which("coalesce.sh"))
+##%    sql_node.add_pre_script_arg(mass_grouping)
+##%
+##%    # This is to identify output from groupings of the sane mass point
+##%    sql_node.add_macro("macromassid", mass_grouping)
+##%
+##%    sql_node.set_category("SQL")
+##%    ppdag.add_node(sql_node)
+##%
 dag_name=opts.output_name
 dag.set_dag_file(dag_name)
 dag.write_concrete_dag()
@@ -283,7 +276,7 @@ if use_bayespe_postproc:
 
     print("Created a postprocessing DAG named %s\n" % ppdag_name)
 
-xmldoc = ligolw.Document()
-xmldoc.appendChild(ligolw.LIGO_LW())
-process.register_to_xmldoc(xmldoc, sys.argv[0], opts.__dict__)
-utils.write_filename(xmldoc, opts.output_name + ".xml.gz", gz=True)
+#xmldoc = ligolw.Document()
+#xmldoc.appendChild(ligolw.LIGO_LW())
+#process.register_to_xmldoc(xmldoc, sys.argv[0], opts.__dict__)
+#utils.write_filename(xmldoc, opts.output_name + ".xml.gz", gz=True)
