@@ -96,7 +96,7 @@ def find_olap_index(tree, intr_prms, exact=True, **kwargs):
     # FIXME: There's still some tolerance from floating point conversions
     if exact and dist > 0.000001:
         exit("Could not find template in bank, closest pt was %f away" % dist)
-    return m_idx, pt
+    return m_idx, pt, dist
 
 def write_to_xml(cells, intr_prms, pin_prms={}, fvals=None, fname=None, verbose=False):
     """
@@ -188,9 +188,10 @@ argp.add_argument("-i", "--intrinsic-param", action="append", help="Adapt in thi
 argp.add_argument("-p", "--pin-param", action="append", help="Pin the parameter to this value in the template bank.")
 
 grid_section = argp.add_argument_group("initial gridding options", "Options for setting up the initial grid.")
-grid_section.add_argument("--setup", help="Set up the initial grid based on template bank overlaps. The new grid will be saved to this argument, e.g. --setup grid will produce a grid.npy file.")
+grid_section.add_argument("--setup", help="Set up the initial grid based on template bank overlaps. The new grid will be saved to this argument, e.g. --setup grid will produce a grid.hdf file.")
+grid_section.add_argument("--output-xml-file-name",default="", help="Set the name of the output xml file. The default name is HL-MASS_POINTS_LEVEL_%d-0-1.xml.gz % level")
 grid_section.add_argument("-t", "--tmplt-bank", help="XML file with template bank.")
-grid_section.add_argument("-O", "--use-overlap", help="Use overlap information to define 'closeness'.")
+grid_section.add_argument("-O", "--use-overlap", action="append",help="Use overlap information to define 'closeness'. If a list of files is given, the script will find the file with the closest template, and select nearby templates only from that file.")
 grid_section.add_argument("-T", "--overlap-threshold", type=float, help="Threshold on overlap value.")
 grid_section.add_argument("-s", "--points-per-side", type=int, default=10, help="Number of points per side, default is 10.")
 grid_section.add_argument("-I", "--initial-region", action="append", help="Override the initial region with a custom specification. Specify multiple times like, -I mass1=1.0,2.0 -I mass2=1.0,1.5")
@@ -199,7 +200,7 @@ grid_section.add_argument("-P", "--prerefine", help="Refine this initial grid ba
 
 refine_section = argp.add_argument_group("refine options", "Options for refining a pre-existing grid.")
 refine_section.add_argument("--refine", help="Refine a prexisting grid. Pass this option the grid points from previous levels (or the --setup) option.")
-refine_section.add_argument("-r", "--result-file", help="XML file containing newest result to refine.")
+refine_section.add_argument("-r", "--result-file", help="Input XML file containing newest result to refine.")
 refine_section.add_argument("-M", "--max-n-points", help="Refine *at most* this many points, can override confidence region thresholds.")
 refine_section.add_argument("-m", "--min-n-points", help="Refine *at least* this many points, can override confidence region thresholds.")
 
@@ -208,19 +209,6 @@ opts = argp.parse_args()
 if not (opts.setup or opts.refine or opts.prerefine):
     exit("Either --setup or --refine or --prerefine must be chosen")
 
-# If asked, retrieve bank overlap
-if opts.use_overlap is not None:
-    h5file = h5py.File(opts.use_overlap, "r")
-
-    # FIXME:
-    #wfrm_fam = args.waveform_type
-    # Just get the first one
-    wfrm_fam = h5file.keys()[0]
-
-    odata = h5file[wfrm_fam]
-    m1, m2, ovrlp = odata["mass1"], odata["mass2"], odata["overlaps"]
-    if opts.verbose:
-        print("Using overlap data from %s" % wfrm_fam)
 
 # Hopefully the point is already present and we can just get it, otherwise it
 # could incur an overlap calculation, or suffer from the effects of being close
@@ -232,60 +220,116 @@ intr_pt = numpy.array([intr_prms[k] for k in sorted(intr_prms)])
 # This keeps the list of parameters consistent across runs
 intr_prms = sorted(intr_prms.keys())
 
-# Transform and repack initial point
-intr_pt = amrlib.apply_transform(intr_pt[numpy.newaxis,:], intr_prms, opts.distance_coordinates)[0]
-intr_pt = dict(zip(intr_prms, intr_pt))
-
-#
-# Step 1: retrieve templates / result
-#
-xmldoc = utils.load_filename(opts.tmplt_bank, contenthandler=ligolw.LIGOLWContentHandler)
-tmplt_bank = lsctables.SnglInspiralTable.get_table(xmldoc)
 
 #
 # Step 2: Set up metric space
 #
+# If asked, retrieve bank overlap
+# You need to use the overlap if generating the inital grid, there is not other option
+# Also, if inital_region = None, it wont be used anywhere
+ovrlp = []
+if opts.use_overlap is not None:
+    # Transform and repack initial point                                                                                                 
+    intr_pt = amrlib.apply_transform(intr_pt[numpy.newaxis,:], intr_prms, opts.distance_coordinates)[0]
+    intr_pt = dict(zip(intr_prms, intr_pt))
 
-if ovrlp.shape[1] != len(tmplt_bank):
-    pts = numpy.array([odata[a] for a in intr_prms]).T
-else:
-    # NOTE: We use the template bank here because the overlap results might not
-    # have all the intrinsic information stored (e.g.: no spins, even though the
-    # bank is aligned-spin).
-    # FIXME: This is an oversight in the overlap calculator which was rectified
-    # but this remains for legacy banks
-    pts = numpy.array([tuple(getattr(t, a) for a in intr_prms) for t in tmplt_bank])
+    #Check if there are many overlap files
+    overlap_filename = ""
+    if len(opts.use_overlap) > 1:
+        #If yes, loop over each one, get the closest in each, and 
+        dists = []
+        for hdf_filename in opts.use_overlap:
+            print (hdf_filename)
+            h5file = h5py.File(hdf_filename, "r")
+            wfrm_fam = h5file.keys()[0]
+            odata = h5file[wfrm_fam]
+            ovrlp = odata["overlaps"]
+            
+            #This only needs to be done when generating the initial grid, using overlaps, if overlap file doesn't have all the necessary information
+            if opts.tmplt_bank is not None:
+                sys.exit("ERROR: Not setup to handle reading stuff from template bank when multiple overlap files provided. You shouldn't need to provide the template bank at all at this point, all the info you need is probably in the overlap file. The template bank option is only kept for backwards compatibility")
 
-pts = amrlib.apply_transform(pts, intr_prms, opts.distance_coordinates)
+            pts = numpy.array([odata[a] for a in intr_prms]).T
+            pts = amrlib.apply_transform(pts, intr_prms, opts.distance_coordinates)
+            tree = BallTree(pts[:ovrlp.shape[0]])
+                
+            #cant require exact match, because don't know if this is the right file yet
+            unused_idx, unused_pt,dist = find_olap_index(tree, intr_prms, False, **intr_pt)
 
-# FIXME: Can probably be moved to point index identification function -- it's
-# not used again
-# The slicing here is a slight hack to work around uberbank overlaps where the
-# overlap matrix is non square. This can be slightly dangerous because it
-# assumes the first N points are from the bank in question. That's okay for now
-# but we're getting increasingly complex in how we do construction, so we should
-# be more sophisticated by matching template IDs instead.
-tree = BallTree(pts[:ovrlp.shape[0]])
+            dists.append(dist)
+            
+        #get index of filename with min dist
+        min_olap_file_index = numpy.where(dists == min(dists))[0][0]
+        overlap_filename = opts.use_overlap[min_olap_file_index]
+        print ("File with closest template",overlap_filename)
+
+    else:
+        overlap_filename = opts.use_overlap[0]
+
+
+    h5file = h5py.File(overlap_filename, "r")
+
+    # FIXME:
+    #wfrm_fam = args.waveform_type
+    # Just get the first one
+    wfrm_fam = h5file.keys()[0]
+
+    odata = h5file[wfrm_fam]
+    #m1 and m2 are not used anywhere, only ovrlp and odata
+    m1, m2, ovrlp = odata["mass1"], odata["mass2"], odata["overlaps"]
+    if opts.verbose:
+        print("Using overlap data from %s" % wfrm_fam)
+
+    #This only needs to be done when generating the initial grid, using overlaps, if overlap file doesn't have all the necessary information
+    tmplt_bank = []
+    if opts.tmplt_bank is not None:
+        xmldoc_tmplt_bank = utils.load_filename(opts.tmplt_bank, contenthandler=ligolw.LIGOLWContentHandler)
+        tmplt_bank = lsctables.SnglInspiralTable.get_table(xmldoc_tmplt_bank)
+
+
+    if ovrlp.shape[1] != len(tmplt_bank):
+        pts = numpy.array([odata[a] for a in intr_prms]).T
+    else:
+        # NOTE: We use the template bank here because the overlap results might not
+        # have all the intrinsic information stored (e.g.: no spins, even though the
+        # bank is aligned-spin).
+        # FIXME: This is an oversight in the overlap calculator which was rectified
+        # but this remains for legacy banks
+        #FIXME: this is the only place where template bank would possibly be used.
+        pts = numpy.array([tuple(getattr(t, a) for a in intr_prms) for t in tmplt_bank])
+
+    pts = amrlib.apply_transform(pts, intr_prms, opts.distance_coordinates)
+
+    # FIXME: Can probably be moved to point index identification function -- it's
+    # not used again
+    # The slicing here is a slight hack to work around uberbank overlaps where the
+    # overlap matrix is non square. This can be slightly dangerous because it
+    # assumes the first N points are from the bank in question. That's okay for now
+    # but we're getting increasingly complex in how we do construction, so we should
+    # be more sophisticated by matching template IDs instead.
+    tree = BallTree(pts[:ovrlp.shape[0]])
+
+    #
+    # Step 3: Get the row of the overlap matrix to work with
+    #
+    m_idx, pt, unused_dist_var = find_olap_index(tree, intr_prms, not opts.no_exact_match, **intr_pt)
+
+    #
+    # Rearrange data to correspond to input point
+    #
+    sort_order = ovrlp[m_idx].argsort()
+    ovrlp = numpy.array(ovrlp[m_idx])[sort_order]
+
+    # DANGEROUS: This assumes the (template bank) points are the same order as the
+    # overlaps. While we've taken every precaution to ensure this is true, it may
+    # not always be.
+    pts = pts[sort_order]
+    m_idx = sort_order[m_idx]
 
 #
-# Step 3: Get the row of the overlap matrix to work with
+# Step 1: Retrieve results from previous integration 
+# Step 2 is before step 1 becuase I moved around the code to put all the overlap stuff togther
 #
-m_idx, pt = find_olap_index(tree, intr_prms, not opts.no_exact_match, **intr_pt)
-
-# Save the template for later use as well
-#t1 = tmplt_bank[m_idx]
-
-#
-# Rearrange data to correspond to input point
-#
-sort_order = ovrlp[m_idx].argsort()
-ovrlp = numpy.array(ovrlp[m_idx])[sort_order]
-
-# DANGEROUS: This assumes the (template bank) points are the same order as the
-# overlaps. While we've taken every precaution to ensure this is true, it may
-# not always be.
-pts = pts[sort_order]
-m_idx = sort_order[m_idx]
 
 # Expanded parameters are now part of the intrinsic set
 intr_prms = list(intr_prms) + expand_prms.keys()
@@ -341,6 +385,7 @@ if opts.refine or opts.prerefine:
 else:
     ####### BEGIN INITIAL GRID CODE #########
     if opts.initial_region is None:
+        #This is the only time anything from the overlap file is used anywhere
         init_region, idx = determine_region(pt, pts, ovrlp, opts.overlap_threshold, expand_prms)
         region_labels = intr_prms
         # FIXME: To be reimplemented in a different way
@@ -427,7 +472,8 @@ grid = amrlib.apply_inv_transform(grid, intr_prms, opts.distance_coordinates)
 
 cells = amrlib.grid_to_cells(grid, spacing)
 if opts.setup:
-    grid_group = amrlib.init_grid_hdf(init_region, opts.setup + ".hdf", opts.overlap_threshold, opts.distance_coordinates, intr_prms=intr_prms)
+    hdf_filename = opts.setup+".hdf" if not ".hdf" in opts.setup else opts.setup
+    grid_group = amrlib.init_grid_hdf(init_region, hdf_filename, opts.overlap_threshold, opts.distance_coordinates, intr_prms=intr_prms)
     level = amrlib.save_grid_cells_hdf(grid_group, cells, "mass1_mass2", intr_prms=intr_prms)
 else:
     grp = amrlib.load_grid_level(opts.refine, None)
@@ -435,7 +481,7 @@ else:
 
 print("Selected %d cells for further analysis." % len(cells))
 if opts.setup:
-    fname = "HL-MASS_POINTS_LEVEL_0-0-1.xml.gz"
+    fname = "HL-MASS_POINTS_LEVEL_0-0-1.xml.gz" if opts.output_xml_file_name is "" else opts.output_xml_file_name 
     write_to_xml(cells, intr_prms, pin_prms, None, fname, verbose=opts.verbose)
 else:
     #m = re.search("LEVEL_(\d+)", opts.result_file)
@@ -444,5 +490,5 @@ else:
         #fname = "HL-MASS_POINTS_LEVEL_%d-0-1.xml.gz" % level
     #else:
         #fname = "HL-MASS_POINTS_LEVEL_X-0-1.xml.gz"
-    fname = "HL-MASS_POINTS_LEVEL_%d-0-1.xml.gz" % level
+    fname = "HL-MASS_POINTS_LEVEL_%d-0-1.xml.gz" % level if opts.output_xml_file_name is "" else opts.output_xml_file_name 
     write_to_xml(cells, intr_prms, pin_prms, None, fname, verbose=opts.verbose)
