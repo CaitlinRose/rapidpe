@@ -237,24 +237,7 @@ for i, tmplt in enumerate(tmplt_bnk):
     ile_node.set_category("ILE")
     dag.add_node(ile_node)
 
-##%    sql_node = pipeline.CondorDAGNode(sql_job_type)
-##%    # FIXME: Uncomment this line and the next to reconnect the subdags
-##%    #if use_bayespe_postproc:
-##%        #bpp_plot_node.add_parent(ile_node)
-##%    #sql_node.add_parent(ile_node)
-##%    sql_node.set_priority(JOB_PRIORITIES["SQL"])
-##%
-##%    # The sql node needs to run a PRE script in order to coalesce the data into
-##%    # a cache
-##%    sql_node.set_pre_script(dagutils.which("coalesce.sh"))
-##%    sql_node.add_pre_script_arg(mass_grouping)
-##%
-##%    # This is to identify output from groupings of the sane mass point
-##%    sql_node.add_macro("macromassid", mass_grouping)
-##%
-##%    sql_node.set_category("SQL")
-##%    ppdag.add_node(sql_node)
-##%
+
 dag_name=opts.output_name
 dag.set_dag_file(dag_name)
 dag.write_concrete_dag()
