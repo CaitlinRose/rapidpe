@@ -161,6 +161,7 @@ if opts.integration_args_dict is not "":
         log_dir=opts.log_directory,
         exe=exe,
         ncopies=opts.n_copies,
+        output_file=opts.output_file,
         **ast.literal_eval(opts.integration_args_dict)
         )
 
