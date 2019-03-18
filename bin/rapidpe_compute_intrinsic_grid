@@ -186,6 +186,7 @@ argp.add_argument("-v", "--verbose", action='store_true', help="Be verbose.")
 # available).
 argp.add_argument("-i", "--intrinsic-param", action="append", help="Adapt in this intrinsic parameter. If a pre-existing value is known (e.g. a search template was identified), specify this parameter as -i mass1=1.4 . This will indicate to the program to choose grid points which are commensurate with this value.")
 argp.add_argument("-p", "--pin-param", action="append", help="Pin the parameter to this value in the template bank.")
+#argp.add_argument( "--fmin-template",default=15.0, help="Min template frequency. Used in some mass transforms.") #Not implemented
 
 grid_section = argp.add_argument_group("initial gridding options", "Options for setting up the initial grid.")
 grid_section.add_argument("--setup", help="Set up the initial grid based on template bank overlaps. The new grid will be saved to this argument, e.g. --setup grid will produce a grid.hdf file.")
@@ -452,6 +453,7 @@ if opts.prerefine:
 
 else:
     grid, spacing = amrlib.refine_regular_grid(selected, spacing, return_cntr=opts.setup)
+
 print("%d cells after refinement" % len(grid))
 grid = amrlib.prune_duplicate_pts(grid, init_region._bounds, spacing)
 
@@ -469,6 +471,7 @@ if len(grid) == 0:
 
 # Convert back to physical mass
 grid = amrlib.apply_inv_transform(grid, intr_prms, opts.distance_coordinates)
+#print "inv transform",grid
 
 cells = amrlib.grid_to_cells(grid, spacing)
 if opts.setup:

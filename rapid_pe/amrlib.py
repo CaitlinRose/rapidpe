@@ -490,14 +490,14 @@ def transform_mceta_m1m2(mc, eta):
 __prefac_0 = 5. / 256 / numpy.pi
 __prefac_3 = 1. / 8
 __dim_mass = lal.G_SI / lal.C_SI**3 * lal.MSUN_SI
-def transform_m1m2_tau0tau3(m1, m2, flow=40.):
+def transform_m1m2_tau0tau3(m1, m2, flow=15.):
     mt = m1 + m2
     eta = m1 * m2 / mt**2
     mt *= numpy.pi * flow * __dim_mass
     return (__prefac_0 / flow / eta * mt**(-5./3), __prefac_3 / flow / eta * mt**(-2./3))
 
 __prefac_tau = 5. / 32 / numpy.pi
-def transform_tau0tau3_m1m2(tau0, tau3, flow=40.):
+def transform_tau0tau3_m1m2(tau0, tau3, flow=15.):
     mt = __prefac_tau / numpy.pi / flow * tau3 / tau0
     eta = 1.0 / 8 / flow / tau3 * (tau0 / __prefac_tau / tau3)**(2./3)
     m1, m2 = m1m2(mt*eta**(3./5), eta)
@@ -576,6 +576,16 @@ INVERSE_TRANSFORMS_MASS = { \
 }
 
 def apply_transform(pts, intr_prms, mass_transform=None, spin_transform=None):
+##%    #FIXME TESTING
+##%    m1_idx, m2_idx = intr_prms.index("mass1"), intr_prms.index("mass2")
+##%    m1,m2 = pts[0,m1_idx], pts[0,m2_idx]
+##%    print "pre inv transofmr",m1,m2
+##%    t1,t2 = VALID_TRANSFORMS_MASS[mass_transform](m1,m2)
+##%    print "transform",t1,t2
+##%    print mass_transform
+##%    print "inv",INVERSE_TRANSFORMS_MASS[VALID_TRANSFORMS_MASS[mass_transform]](t1,t2)
+##%    assert 1==0
+##%
     # You know what... recarrays are dumb, and so's your face.
     # FIXME: Why does numpy want me to repack this into tuples!?
     #tpts = numpy.array([tuple(pt) for pt in pts.T], dtype = numpy.dtype([(a ,"float64") for a in intr_prms]))
@@ -596,8 +606,10 @@ def apply_transform(pts, intr_prms, mass_transform=None, spin_transform=None):
 
 def apply_inv_transform(pts, intr_prms, mass_transform=None):
     m1_idx, m2_idx = intr_prms.index("mass1"), intr_prms.index("mass2")
+
     if mass_transform:
-       pts[:,m1_idx], pts[:,m2_idx] = INVERSE_TRANSFORMS_MASS[VALID_TRANSFORMS_MASS[mass_transform]](pts[:,m1_idx], pts[:,m2_idx])
+        pts[:,m1_idx], pts[:,m2_idx] = INVERSE_TRANSFORMS_MASS[VALID_TRANSFORMS_MASS[mass_transform]](pts[:,m1_idx], pts[:,m2_idx])
+
 
     # Independent transforms go here
 
