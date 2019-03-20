@@ -185,7 +185,7 @@ argp.add_argument("-v", "--verbose", action='store_true', help="Be verbose.")
 # this is range). No argument given implies use entire known range (if
 # available).
 argp.add_argument("-i", "--intrinsic-param", action="append", help="Adapt in this intrinsic parameter. If a pre-existing value is known (e.g. a search template was identified), specify this parameter as -i mass1=1.4 . This will indicate to the program to choose grid points which are commensurate with this value.")
-argp.add_argument("-p", "--pin-param", action="append", help="Pin the parameter to this value in the template bank.")
+argp.add_argument("-p", "--pin-param", action="append", help="Pin the parameter to this value in the template bank. If spin is not defined, spin1z,spin2z will be pinned to 0. ")
 #argp.add_argument( "--fmin-template",default=15.0, help="Min template frequency. Used in some mass transforms.") #Not implemented
 
 grid_section = argp.add_argument_group("initial gridding options", "Options for setting up the initial grid.")
@@ -221,6 +221,18 @@ intr_pt = numpy.array([intr_prms[k] for k in sorted(intr_prms)])
 # This keeps the list of parameters consistent across runs
 intr_prms = sorted(intr_prms.keys())
 
+#If spin 1 and 2 are not specified, they are pinned. This means the spin columns still appear in the output grid.
+spin_transform=None
+if not "spin1z" in intr_prms or not "spin2z" in intr_prms:
+    if not "spin1z" in intr_prms and not "spin2z" in intr_prms:
+        if not "spin1z" in pin_prms:
+            pin_prms["spin1z"] = 0.0
+        if not "spin2z" in pin_prms:
+            pin_prms["spin2z"] = 0.0
+    else:
+        sys.exit("spin1z or spin2z is specified but not the other spin. compute intrinsic grid is not setup to search just one")
+else:
+    spin_transform = "chi_z"
 
 #
 # Step 2: Set up metric space
@@ -231,7 +243,7 @@ intr_prms = sorted(intr_prms.keys())
 ovrlp = []
 if opts.use_overlap is not None:
     # Transform and repack initial point                                                                                                 
-    intr_pt = amrlib.apply_transform(intr_pt[numpy.newaxis,:], intr_prms, opts.distance_coordinates)[0]
+    intr_pt = amrlib.apply_transform(intr_pt[numpy.newaxis,:], intr_prms, opts.distance_coordinates,spin_transform)[0]
     intr_pt = dict(zip(intr_prms, intr_pt))
 
     #Check if there are many overlap files
@@ -251,7 +263,7 @@ if opts.use_overlap is not None:
                 sys.exit("ERROR: Not setup to handle reading stuff from template bank when multiple overlap files provided. You shouldn't need to provide the template bank at all at this point, all the info you need is probably in the overlap file. The template bank option is only kept for backwards compatibility")
 
             pts = numpy.array([odata[a] for a in intr_prms]).T
-            pts = amrlib.apply_transform(pts, intr_prms, opts.distance_coordinates)
+            pts = amrlib.apply_transform(pts, intr_prms, opts.distance_coordinates,spin_transform)
             tree = BallTree(pts[:ovrlp.shape[0]])
                 
             #cant require exact match, because don't know if this is the right file yet
@@ -276,8 +288,7 @@ if opts.use_overlap is not None:
     wfrm_fam = h5file.keys()[0]
 
     odata = h5file[wfrm_fam]
-    #m1 and m2 are not used anywhere, only ovrlp and odata
-    m1, m2, ovrlp = odata["mass1"], odata["mass2"], odata["overlaps"]
+    ovrlp = odata["overlaps"]
     if opts.verbose:
         print("Using overlap data from %s" % wfrm_fam)
 
@@ -299,7 +310,7 @@ if opts.use_overlap is not None:
         #FIXME: this is the only place where template bank would possibly be used.
         pts = numpy.array([tuple(getattr(t, a) for a in intr_prms) for t in tmplt_bank])
 
-    pts = amrlib.apply_transform(pts, intr_prms, opts.distance_coordinates)
+    pts = amrlib.apply_transform(pts, intr_prms, opts.distance_coordinates,spin_transform)
 
     # FIXME: Can probably be moved to point index identification function -- it's
     # not used again
@@ -356,7 +367,7 @@ if opts.result_file:
             results.extend(lsctables.SnglInspiralTable.get_table(xmldoc))
 
     res_pts = numpy.array([tuple(getattr(t, a) for a in intr_prms) for t in results])
-    res_pts = amrlib.apply_transform(res_pts, intr_prms, opts.distance_coordinates)
+    res_pts = amrlib.apply_transform(res_pts, intr_prms, opts.distance_coordinates,spin_transform)
 
     # In the prerefine case, the "result" is the overlap values, which we use as
     # a surrogate for the true evidence value.
@@ -389,6 +400,7 @@ else:
         #This is the only time anything from the overlap file is used anywhere
         init_region, idx = determine_region(pt, pts, ovrlp, opts.overlap_threshold, expand_prms)
         region_labels = intr_prms
+#        print "init trgion",len(pts[idx:])
         # FIXME: To be reimplemented in a different way
         #if opts.expand_param is not None:
             #expand_param(init_region, opts.expand_param)
@@ -401,7 +413,7 @@ else:
     # TODO: Alternatively, check density of points in the region to determine
     # the points to a side
     grid, spacing = amrlib.create_regular_grid_from_cell(init_region, side_pts=opts.points_per_side / 2, return_cells=True)
-
+#    print "grid",len(grid)
     # "Deactivate" cells not close to template points
     # FIXME: This gets more and more dangerous in higher dimensions
     # FIXME: Move to function
@@ -413,6 +425,8 @@ else:
         selected = grid[numpy.array(list(get_idx))]
     else:
         selected = grid
+#    print "selected",len(selected)
+#    sys.exit()
 
 # Make sure all our dimensions line up
 # FIXME: We just need to be consistent from the beginning
@@ -432,7 +446,7 @@ if opts.result_file is not None:
     (prev_cells, spacing), level, _ = amrlib.load_grid_level(opts.refine or opts.prerefine, -1, True)
 
     selected = numpy.array([c._center for c in prev_cells])
-    selected = amrlib.apply_transform(selected, intr_prms, opts.distance_coordinates)
+    selected = amrlib.apply_transform(selected, intr_prms, opts.distance_coordinates,spin_transform)
 
     selected = get_evidence_grid(selected, res_pts, intr_prms)
 
@@ -452,11 +466,13 @@ if opts.prerefine:
     grid, spacing = amrlib.refine_regular_grid(selected, spacing, return_cntr=True)
 
 else:
+#    print "selected",len(selected)
     grid, spacing = amrlib.refine_regular_grid(selected, spacing, return_cntr=opts.setup)
+#    print "refine grid",len(grid)
 
 print("%d cells after refinement" % len(grid))
 grid = amrlib.prune_duplicate_pts(grid, init_region._bounds, spacing)
-
+#print "prune grid",len(grid)
 #
 # Clean up
 #
@@ -470,7 +486,7 @@ if len(grid) == 0:
     exit("All cells would be removed by physical boundaries.")
 
 # Convert back to physical mass
-grid = amrlib.apply_inv_transform(grid, intr_prms, opts.distance_coordinates)
+grid = amrlib.apply_inv_transform(grid, intr_prms, opts.distance_coordinates,spin_transform)
 #print "inv transform",grid
 
 cells = amrlib.grid_to_cells(grid, spacing)

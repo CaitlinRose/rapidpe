@@ -490,14 +490,14 @@ def transform_mceta_m1m2(mc, eta):
 __prefac_0 = 5. / 256 / numpy.pi
 __prefac_3 = 1. / 8
 __dim_mass = lal.G_SI / lal.C_SI**3 * lal.MSUN_SI
-def transform_m1m2_tau0tau3(m1, m2, flow=15.):
+def transform_m1m2_tau0tau3(m1, m2, flow=40.):
     mt = m1 + m2
     eta = m1 * m2 / mt**2
     mt *= numpy.pi * flow * __dim_mass
     return (__prefac_0 / flow / eta * mt**(-5./3), __prefac_3 / flow / eta * mt**(-2./3))
 
 __prefac_tau = 5. / 32 / numpy.pi
-def transform_tau0tau3_m1m2(tau0, tau3, flow=15.):
+def transform_tau0tau3_m1m2(tau0, tau3, flow=40.):
     mt = __prefac_tau / numpy.pi / flow * tau3 / tau0
     eta = 1.0 / 8 / flow / tau3 * (tau0 / __prefac_tau / tau3)**(2./3)
     m1, m2 = m1m2(mt*eta**(3./5), eta)
@@ -505,6 +505,22 @@ def transform_tau0tau3_m1m2(tau0, tau3, flow=15.):
 
 def transform_s1zs2z_chi(m1, m2, s1z, s2z):
     return (m1 * s1z + m2 * s2z) / (m1 + m2)
+
+def transform_s1zs2z_chi_eff_chi_a(mass1, mass2, spin1z, spin2z):
+    #Copied from pycbc https://github.com/gwastro/pycbc/blob/master/pycbc/conversions.py
+    """ Returns the aligned mass-weighted spin difference from mass1, mass2,
+    spin1z, and spin2z.
+    """
+    chi_eff = (spin1z * mass1 + spin2z * mass2) / (mass1 + mass2)
+    chi_a = (spin2z * mass2 - spin1z * mass1) / (mass2 + mass1)
+    return chi_eff,chi_a
+
+def transform_chi_eff_chi_a_s1zs2z(mass1, mass2, chi_eff, chi_a):
+    """Returns spin1z.
+    """
+    spin1z = (mass1 + mass2) / (2.0 * mass1) * (chi_eff - chi_a)
+    spin2z = (mass1 + mass2) / (2.0 * mass2) * (chi_eff + chi_a)
+    return spin1z,spin2z
 
 def transform_m1m2_mcq(m1, m2):
     mc = (m1 * m2)**(3./5) / (m1 + m2)**(1./5)
@@ -577,15 +593,14 @@ INVERSE_TRANSFORMS_MASS = { \
 
 def apply_transform(pts, intr_prms, mass_transform=None, spin_transform=None):
 ##%    #FIXME TESTING
-##%    m1_idx, m2_idx = intr_prms.index("mass1"), intr_prms.index("mass2")
-##%    m1,m2 = pts[0,m1_idx], pts[0,m2_idx]
+##%    m1,m2 = 8.87543,16.149322
 ##%    print "pre inv transofmr",m1,m2
 ##%    t1,t2 = VALID_TRANSFORMS_MASS[mass_transform](m1,m2)
 ##%    print "transform",t1,t2
 ##%    print mass_transform
 ##%    print "inv",INVERSE_TRANSFORMS_MASS[VALID_TRANSFORMS_MASS[mass_transform]](t1,t2)
 ##%    assert 1==0
-##%
+##%##%
     # You know what... recarrays are dumb, and so's your face.
     # FIXME: Why does numpy want me to repack this into tuples!?
     #tpts = numpy.array([tuple(pt) for pt in pts.T], dtype = numpy.dtype([(a ,"float64") for a in intr_prms]))
@@ -593,9 +608,13 @@ def apply_transform(pts, intr_prms, mass_transform=None, spin_transform=None):
     if spin_transform:
         if spin_transform == "chi_z":
             s1z_idx, s2z_idx = intr_prms.index("spin1z"), intr_prms.index("spin2z")
-            chi_z = transform_s1zs2z_chi(pts[:,m1_idx], pts[:,m2_idx], pts[:,s1z_idx], pts[:,s2z_idx]) 
-            pts = numpy.vstack((pts.T, chi_z)).T
-            intr_prms.append("chi_z")
+#            chi_z = transform_s1zs2z_chi(pts[:,m1_idx], pts[:,m2_idx], pts[:,s1z_idx], pts[:,s2z_idx]) 
+            #The grid is converted from m1 m2 s1 s2 to mc eta chi_eff because it's better to choose the closest grid points in mc eta chi_eff space. 
+            #chi_a is not considered when choosing the closes grid points, but we do need it to transform back to s1 s2
+            pts[:,s1z_idx],pts[:,s2z_idx] = transform_s1zs2z_chi_eff_chi_a(pts[:,m1_idx], pts[:,m2_idx], pts[:,s1z_idx], pts[:,s2z_idx])
+            
+#            pts = numpy.vstack((pts.T, chi_eff)).T
+#            intr_prms.append("chi_z")
 
     if mass_transform:
        pts[:,m1_idx], pts[:,m2_idx] = VALID_TRANSFORMS_MASS[mass_transform](pts[:,m1_idx], pts[:,m2_idx])
@@ -604,13 +623,17 @@ def apply_transform(pts, intr_prms, mass_transform=None, spin_transform=None):
 
     return pts
 
-def apply_inv_transform(pts, intr_prms, mass_transform=None):
+def apply_inv_transform(pts, intr_prms, mass_transform=None,spin_transform=None):
     m1_idx, m2_idx = intr_prms.index("mass1"), intr_prms.index("mass2")
-
     if mass_transform:
         pts[:,m1_idx], pts[:,m2_idx] = INVERSE_TRANSFORMS_MASS[VALID_TRANSFORMS_MASS[mass_transform]](pts[:,m1_idx], pts[:,m2_idx])
+    
+    if spin_transform:
+        if spin_transform == "chi_z":
+            s1z_idx, s2z_idx = intr_prms.index("spin1z"), intr_prms.index("spin2z")
+            pts[:,s1z_idx],pts[:,s2z_idx] =transform_chi_eff_chi_a_s1zs2z(pts[:,m1_idx], pts[:,m2_idx], pts[:,s1z_idx], pts[:,s2z_idx])
 
-
+        
     # Independent transforms go here
 
     return pts

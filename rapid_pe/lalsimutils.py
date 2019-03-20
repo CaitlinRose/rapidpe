@@ -761,8 +761,8 @@ def symRatio(m1, m2):
 
 def m1m2(Mc, eta):
     """Compute component masses from Mc, eta. Returns m1 >= m2"""
-    m2 = 0.5*Mc*eta**(-3./5.)*(1. + norm_sym_ratio(eta))
-    m1 = 0.5*Mc*eta**(-3./5.)*(1. - norm_sym_ratio(eta))
+    m1 = 0.5*Mc*eta**(-3./5.)*(1. + norm_sym_ratio(eta))
+    m2 = 0.5*Mc*eta**(-3./5.)*(1. - norm_sym_ratio(eta))
     return m1, m2
 
 def Mceta(m1, m2):
