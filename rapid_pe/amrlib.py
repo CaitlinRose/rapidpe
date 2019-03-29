@@ -524,7 +524,7 @@ def transform_chi_eff_chi_a_s1zs2z(mass1, mass2, chi_eff, chi_a):
 
 def transform_m1m2_mcq(m1, m2):
     mc = (m1 * m2)**(3./5) / (m1 + m2)**(1./5)
-    q = np.min([m1, m2], axis=0) / np.max([m1, m2], axis=0)
+    q = numpy.min([m1, m2], axis=0) / numpy.max([m1, m2], axis=0)
     return mc, q
 
 def transform_mcq_m1m2(mc, q):
