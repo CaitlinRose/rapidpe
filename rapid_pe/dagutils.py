@@ -130,10 +130,11 @@ def write_integrate_likelihood_extrinsic_sub(tag='integrate', exe=None, log_dir=
         ile_job.add_var_opt(p)
 
     ile_job.add_condor_cmd('getenv', 'True')
+    ile_job.add_condor_cmd('request_memory', '4096')
     if condor_commands is not None:
         for cmd, value in condor_commands.iteritems():
             ile_job.add_condor_cmd(cmd, value)
-    ile_job.add_condor_cmd('request_memory', '2048')
+    
     
     return ile_job, ile_sub_name
 

@@ -1287,7 +1287,7 @@ def frame_data_to_hoft(fname, channel, start=None, stop=None, window_shape=0.,
         cache = Cache.fromfile(fobj)
 
     cache = cache.sieve(ifos=channel[:1])
-    tmp = read_timeseries(cache, channel, start, stop - start, verbose=verbose)
+    tmp = read_timeseries(cache, channel, start, duration, verbose=verbose)
 
     # Window the data - N.B. default is identity (no windowing)
     hoft_window = lal.CreateTukeyREAL8Window(tmp.data.length, window_shape)

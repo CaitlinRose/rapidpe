@@ -111,6 +111,7 @@ def add_output_params(argp):
 def add_integration_params(argp):
     integration_params = argp.add_argument_group("Integration Parameters", "Control the integration with these options.")
     integration_params.add_argument("--distance-maximum", default=300.0, type=float, help="Override the maximum distance in the prior. Default is 300 Mpc.")
+    integration_params.add_argument("--distance-minimum", default=1.0, type=float, help="Override the minimum distance in the prior. Default is 1 Mpc. This is only useful when generating pp-plots, wouldn't recommend it otherwise.")
     integration_params.add_argument("-m", "--time-marginalization", action="store_true", help="Perform marginalization over time via direct numerical integration. Default is false.")
     # Default is actually None, but that tells the integrator to go forever or until n_eff is hit.
     integration_params.add_argument("--zero-noise", action="store_true", help="Do not use input data as noise. Use with --pin-to-sim to make an injection")

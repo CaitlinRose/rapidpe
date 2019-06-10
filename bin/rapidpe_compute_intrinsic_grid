@@ -72,12 +72,35 @@ def determine_region(pt, pts, ovrlp, ovrlp_thresh, expand_prms={}):
     Given a point (pt) in a set of points (pts), with a function value at those points (ovrlp), return a rectangular hull such that the function exceeds the value ovrlp_thresh.
     """
     sidx = bisect.bisect(ovrlp, ovrlp_thresh)
-    #print "Found %d neighbors with overlap >= %f" % (len(ovrlp[sidx:]), ovrlp_thresh)
+#    print "Found %d neighbors with overlap >= %f" % (len(ovrlp[sidx:]), ovrlp_thresh)
+    print "HERE",ovrlp_thresh,ovrlp[sidx:],pts[sidx:],pt
+#    print "HERE",ovrlp_thresh,ovrlp[sidx:],pts[sidx:],pt
+    
 
     cell = amrlib.Cell.make_cell_from_boundaries(pt, pts[sidx:])
     for k, lim in expand_prms.iteritems():
         cell._bounds = numpy.vstack((cell._bounds, lim))
         # FIXME: Need to do center?
+    #Force eta to be bounded at 0.25
+    if opts.distance_coordinates == "mchirp_eta":
+        if cell._bounds[1][1] > 0.25:
+            cell._bounds[1][1] = 0.25
+        if cell._bounds[1][0] >= 0.25:
+            cell._bounds[1][0] = 0.25-1e-7
+        if cell._bounds[1][0] < 0.01:
+            #As of 201905 SEOBNRv4 cant handle mass ratios > 100, so don't let eta frop below 0.01
+            cell._bounds[1][0] = 0.01
+    #If ranges for Mc are specified, require bins to be in this range
+    if opts.distance_coordinates == "mchirp_eta" and (opts.mc_min is not None or opts.mc_max is not None):
+        mc_min = -1 if opts.mc_min is None else opts.mc_min
+        mc_max = 99999999.0 if opts.mc_max is None else opts.mc_max
+        if cell._bounds[0][0] < mc_min:
+            cell._bounds[0][0] = mc_min
+        if cell._bounds[0][1] > mc_max:
+            cell._bounds[0][1] = mc_max
+        if cell._bounds[0][1] < mc_min or cell._bounds[0][0] > mc_max:
+            sys.exit("ERROR: All grid points are outside the specified mc-range. Are you sure you want to set --mc-min or mc-max? You probably don't.")
+
     return cell, sidx
 
 def find_olap_index(tree, intr_prms, exact=True, **kwargs):
@@ -174,7 +197,7 @@ def plot_grid_cells(cells, color, axis1=0, axis2=1):
 
 argp = ArgumentParser()
 
-argp.add_argument("-d", "--distance-coordinates", default="tau0_tau3", help="Coordinate system in which to calculate 'closeness'. Default is tau0_tau3.")
+argp.add_argument("-d", "--distance-coordinates", default=None, help="Coordinate system in which to calculate 'closeness'. Default is tau0_tau3.")
 argp.add_argument("-n", "--no-exact-match", action="store_true", help="Loosen criteria that the input intrinsic point must be a member of the input template bank.")
 argp.add_argument("-v", "--verbose", action='store_true', help="Be verbose.")
 
@@ -193,11 +216,13 @@ grid_section.add_argument("--setup", help="Set up the initial grid based on temp
 grid_section.add_argument("--output-xml-file-name",default="", help="Set the name of the output xml file. The default name is HL-MASS_POINTS_LEVEL_%d-0-1.xml.gz % level")
 grid_section.add_argument("-t", "--tmplt-bank", help="XML file with template bank.")
 grid_section.add_argument("-O", "--use-overlap", action="append",help="Use overlap information to define 'closeness'. If a list of files is given, the script will find the file with the closest template, and select nearby templates only from that file.")
-grid_section.add_argument("-T", "--overlap-threshold", type=float, help="Threshold on overlap value.")
+grid_section.add_argument("-T", "--overlap-threshold", default=0.9,type=float, help="Threshold on overlap value.")
 grid_section.add_argument("-s", "--points-per-side", type=int, default=10, help="Number of points per side, default is 10.")
 grid_section.add_argument("-I", "--initial-region", action="append", help="Override the initial region with a custom specification. Specify multiple times like, -I mass1=1.0,2.0 -I mass2=1.0,1.5")
 grid_section.add_argument("-D", "--deactivate", action="store_true", help="Deactivate cells initially which have no template within them.")
 grid_section.add_argument("-P", "--prerefine", help="Refine this initial grid based on overlap values.")
+grid_section.add_argument("--mc-min", type=float, default=None, help="Restrict chirp mass grid points to be > mc-min. This is used when generating pp-plots, so that recovered Mc isn't outside of injected prior range.It should not be used otherwise.")
+grid_section.add_argument("--mc-max", type=float, default=None, help="Restrict chirp mass grid points to be < mc-max. This is used when generating pp-plots, so that recovered Mc isn't outside of injected prior range.It should not be used otherwise.")
 
 refine_section = argp.add_argument_group("refine options", "Options for refining a pre-existing grid.")
 refine_section.add_argument("--refine", help="Refine a prexisting grid. Pass this option the grid points from previous levels (or the --setup) option.")
@@ -268,7 +293,6 @@ if opts.use_overlap is not None:
                 
             #cant require exact match, because don't know if this is the right file yet
             unused_idx, unused_pt,dist = find_olap_index(tree, intr_prms, False, **intr_pt)
-
             dists.append(dist)
             
         #get index of filename with min dist
@@ -325,6 +349,8 @@ if opts.use_overlap is not None:
     # Step 3: Get the row of the overlap matrix to work with
     #
     m_idx, pt, unused_dist_var = find_olap_index(tree, intr_prms, not opts.no_exact_match, **intr_pt)
+    print "HERE2: ",pt,m_idx,unused_dist_var
+#    m_idx = 266
 
     #
     # Rearrange data to correspond to input point

@@ -216,6 +216,8 @@ class MCSampler(object):
     def draw(self, rvs, *args, **kwargs):
         """
         Draw a set of random variates for parameter(s) args. Left and right limits are handed to the function. If args is None, then draw *all* parameters. 'rdict' parameter is a boolean. If true, returns a dict matched to param name rather than list. rvs must be either a list of uniform random variates to transform for sampling, or an integer number of samples to draw.
+        This is called at the start of each chunk, to determine at what extrinsic parameters then chunk should start
+
         """
         if len(args) == 0:
             args = self.params
@@ -506,6 +508,8 @@ class MCSampler(object):
                             self._rvs[key] = self._rvs[key][:,pt_sort]
                         else:
                             self._rvs[key] = self._rvs[key][pt_sort]
+
+                #continue for:   while self.ntotal < nmin or (eff_samp < neff and self.ntotal < nmax):
                 continue
             old_maxval = maxval
 
@@ -555,6 +559,7 @@ class MCSampler(object):
             sorted_weights = sorted_weights[idx:]
             # Remove all samples which contribute to smallest 1e-3 of cumulative
             # probability
+            #FIXME: return here.
             for key in self._rvs.keys():
                 if isinstance(key, tuple):
                     self._rvs[key] = self._rvs[key][:,sorted_weights]
