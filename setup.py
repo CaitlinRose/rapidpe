@@ -29,7 +29,7 @@ setup_requires = [
     "setuptools",
 ]
 install_requires = [
-    "h5py"
+    "h5py",
     "lalsuite",
     "lscsoft-glue",
     "matplotlib",
